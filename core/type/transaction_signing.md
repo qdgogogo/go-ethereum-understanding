@@ -63,3 +63,27 @@ WithSignature返回具有给定签名的新事务。
 		cpy.data.R, cpy.data.S, cpy.data.V = r, s, v
 		return cpy, nil
 	}
+
+Sender使用secp256k1椭圆曲线返回从签名（V，R，S）派生的地址，如果导出失败或签名错误，则返回错误。
+
+Sender可以缓存该地址，无论签名方法如何，都可以使用该地址。 如果缓存的签名者与当前调用中使用的签名者不匹配，则缓存无效。
+	
+	func Sender(signer Signer, tx *Transaction) (common.Address, error) {
+		if sc := tx.from.Load(); sc != nil {
+			sigCache := sc.(sigCache)
+			// If the signer used to derive from in a previous
+			// call is not the same as used current, invalidate
+			// the cache.
+			// 如果用于在先前调用中派生的签名者与使用的当前节点不同，则使缓存无效。
+			if sigCache.signer.Equal(signer) {
+				return sigCache.from, nil
+			}
+		}
+		// 获得事务发送者的地址
+		addr, err := signer.Sender(tx)
+		if err != nil {
+			return common.Address{}, err
+		}
+		tx.from.Store(sigCache{signer: signer, from: addr})
+		return addr, nil
+	}

@@ -112,6 +112,7 @@ New创建了一个新的P2P节点，为协议注册做好了准备。
 			conf.Logger = log.New()
 		}
 		//注意：与Config的任何交互都会在数据目录或实例目录中创建/触摸文件，直到Start为止。
+		//touch files是什么意思？
 		return &Node{
 			accman:            am,
 			ephemeralKeystore: ephemeralKeystore,

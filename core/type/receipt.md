@@ -17,3 +17,17 @@ Receipt代表事务的结果，事务的输出
 		ContractAddress common.Address `json:"contractAddress"`
 		GasUsed         uint64         `json:"gasUsed" gencodec:"required"` //仅此特定交易所使用的gas量。
 	}
+
+创建收据的时候根据事务运行的结果初始化收据状态
+
+
+	func NewReceipt(root []byte, failed bool, cumulativeGasUsed uint64) *Receipt {
+		r := &Receipt{PostState: common.CopyBytes(root), CumulativeGasUsed: cumulativeGasUsed}
+		if failed {
+			// 如果事务运行失败
+			r.Status = ReceiptStatusFailed
+		} else {
+			r.Status = ReceiptStatusSuccessful //成功
+		}
+		return r
+	}

@@ -70,3 +70,23 @@ transaction：由外部人员签名的一段数据，它表示消息或新的自
 message：通过自治对象的确定性操作或事务的加密安全签名在两个帐户之间传递的数据（作为一组字节）和值（指定为以太）。这意味着消息是在两个帐户之间传递的以太坊的数据和值。 通过彼此交互的合同或通过交易创建消息。 
 
 总的来说事务是明确在区块链上的而消息是“内部的”。
+
+
+AsMessage将事务作为消息输出，需要一个签名者
+
+
+	func (tx *Transaction) AsMessage(s Signer) (Message, error) {
+		msg := Message{
+			nonce:      tx.data.AccountNonce,
+			gasLimit:   tx.data.GasLimit,
+			gasPrice:   new(big.Int).Set(tx.data.Price),
+			to:         tx.data.Recipient,
+			amount:     tx.data.Amount,
+			data:       tx.data.Payload,
+			checkNonce: true,
+		}
+	
+		var err error
+		msg.from, err = Sender(s, tx)
+		return msg, err
+	}
