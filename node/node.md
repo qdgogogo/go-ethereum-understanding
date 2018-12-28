@@ -125,3 +125,121 @@ New创建了一个新的P2P节点，为协议注册做好了准备。
 			log:               conf.Logger,
 		}, nil
 	}
+
+Attach创建一个附加到进程内API处理程序的RPC客户端。
+
+
+	func (n *Node) Attach() (*rpc.Client, error) {
+		n.lock.RLock()
+		defer n.lock.RUnlock()
+	
+		if n.server == nil {
+			return nil, ErrNodeStopped
+		}
+		return rpc.DialInProc(n.inprocHandler), nil
+	}
+
+创建p2p节点并启动它
+
+	func (n *Node) Start() error {
+		n.lock.Lock()
+		defer n.lock.Unlock()
+	
+		// Short circuit if the node's already running
+		// 如果节点已经在运行则短路
+		if n.server != nil {
+			return ErrNodeRunning
+		}
+		if err := n.openDataDir(); err != nil {
+			return err
+		}
+	
+		// Initialize the p2p server. This creates the node key and
+		// discovery databases.
+		// 初始化p2p服务器。 这将创建节点密钥和发现数据库。
+		n.serverConfig = n.config.P2P
+		n.serverConfig.PrivateKey = n.config.NodeKey()
+		n.serverConfig.Name = n.config.NodeName()
+		n.serverConfig.Logger = n.log
+		if n.serverConfig.StaticNodes == nil {
+			n.serverConfig.StaticNodes = n.config.StaticNodes()
+		}
+		if n.serverConfig.TrustedNodes == nil {
+			n.serverConfig.TrustedNodes = n.config.TrustedNodes()
+		}
+		if n.serverConfig.NodeDatabase == "" {
+			n.serverConfig.NodeDatabase = n.config.NodeDB()
+		}
+		running := &p2p.Server{Config: n.serverConfig}
+		n.log.Info("Starting peer-to-peer node", "instance", n.serverConfig.Name)
+	
+		// Otherwise copy and specialize the P2P configuration
+		// 否则复制并专门化P2P配置
+		services := make(map[reflect.Type]Service)
+		for _, constructor := range n.serviceFuncs {
+			// Create a new context for the particular service
+			// 为特定服务创建新环境
+			ctx := &ServiceContext{
+				config:         n.config,
+				services:       make(map[reflect.Type]Service),
+				EventMux:       n.eventmux,
+				AccountManager: n.accman,
+			}
+			for kind, s := range services { // copy needed for threaded access
+				ctx.services[kind] = s
+			}
+			// Construct and save the service
+			// 构建并保存服务
+			service, err := constructor(ctx)
+			if err != nil {
+				return err
+			}
+			kind := reflect.TypeOf(service)
+			if _, exists := services[kind]; exists {
+				return &DuplicateServiceError{Kind: kind}
+			}
+			services[kind] = service
+		}
+		// Gather the protocols and start the freshly assembled P2P server
+		// 收集协议并启动新组装的P2P服务器
+	
+		for _, service := range services {
+			running.Protocols = append(running.Protocols, service.Protocols()...)
+		}
+		if err := running.Start(); err != nil {
+			return convertFileLockError(err)
+		}
+		// Start each of the services
+		// 启动每个服务
+		started := []reflect.Type{}
+		for kind, service := range services {
+			// Start the next service, stopping all previous upon failure
+			// 启动下一个服务，在失败时停止所有服务
+			if err := service.Start(running); err != nil {
+				for _, kind := range started {
+					services[kind].Stop()
+				}
+				running.Stop()
+	
+				return err
+			}
+			// Mark the service started for potential cleanup
+			// 标记为潜在清理启动的服务
+			started = append(started, kind)
+		}
+		// Lastly start the configured RPC interfaces
+		// 最后启动配置的RPC接口
+		if err := n.startRPC(services); err != nil {
+			for _, service := range services {
+				service.Stop()
+			}
+			running.Stop()
+			return err
+		}
+		// Finish initializing the startup
+		n.services = services
+		n.server = running
+		n.stop = make(chan struct{})
+	
+		return nil
+	}
